@@ -1,0 +1,82 @@
+name: Build TB311FU kernel
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "kernel/configs/**"
+      - "kernel/patches/**"
+      - "kernel/source.json"
+      - ".github/workflows/build-tb311fu-kernel.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    env:
+      KERNEL_COMMIT: 1782065b5f3dad41d3785247e50820553c3473e6
+      TOOLCHAIN_REPO: https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86.git
+      TOOLCHAIN_BRANCH: master
+      TOOLCHAIN_DIR: clang-r510928
+      KERNEL_SRC: ${{ github.workspace }}/common
+      CLANG_BIN: ${{ github.workspace }}/toolchains/clang-r510928/bin
+      KERNEL_OUT: ${{ github.workspace }}/build/kernel
+
+    steps:
+      - name: Checkout TB311FU repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential flex gcc-aarch64-linux-gnu \
+            libelf-dev libssl-dev make python3 rsync llvm lld
+
+      - name: Fetch pinned Android Common kernel source
+        run: |
+          git init common
+          git -C common remote add origin https://android.googlesource.com/kernel/common
+          git -C common fetch --depth=1 origin "$KERNEL_COMMIT"
+          git -C common checkout --detach FETCH_HEAD
+
+      - name: Fetch Android Clang r510928
+        run: |
+          git clone --depth=1 --filter=blob:none --sparse \
+            --branch "$TOOLCHAIN_BRANCH" "$TOOLCHAIN_REPO" toolchains
+          git -C toolchains sparse-checkout set "$TOOLCHAIN_DIR"
+          test -x "$CLANG_BIN/clang"
+          echo "$CLANG_BIN" >> "$GITHUB_PATH"
+
+      - name: Apply repository host OpenSSL patch
+        run: |
+          git -C common apply --check "$GITHUB_WORKSPACE/kernel/patches/0001-host-openssl.patch"
+          git -C common apply "$GITHUB_WORKSPACE/kernel/patches/0001-host-openssl.patch"
+
+      - name: Configure and build TB311FU kernel
+        run: |
+          mkdir -p "$KERNEL_OUT"
+          cp kernel/configs/tb311fu_defconfig "$KERNEL_OUT/.config"
+          export PATH="$CLANG_BIN:$PATH"
+          export ARCH=arm64 LLVM=1 LLVM_IAS=1
+          export KCONFIG_OVERWRITECONFIG=1
+          export KBUILD_BUILD_USER=builder KBUILD_BUILD_HOST=localhost
+          export KCFLAGS="-D__ANDROID_COMMON_KERNEL__"
+
+          make -C "$KERNEL_SRC" O="$KERNEL_OUT" olddefconfig
+          make -C "$KERNEL_SRC" O="$KERNEL_OUT" \
+            -j"$(nproc)" Image modules
+
+      - name: Upload kernel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tb311fu-kernel-arm64
+          if-no-files-found: error
+          path: |
+            build/kernel/arch/arm64/boot/Image
+            build/kernel/vmlinux
+            build/kernel/.config
