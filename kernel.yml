@@ -5,8 +5,7 @@ kernel:
     manifest:
       repository: https://android.googlesource.com/kernel/manifest
       branch: common-android15-6.6
+    build:
+      target: gki_defconfig
   configs:
-    - lindroid-drm
-    - lxc
-    - docker
-    - lxd
+    - gki_defconfig
