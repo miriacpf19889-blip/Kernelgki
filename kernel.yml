@@ -1,6 +1,12 @@
 kernel:
   version: "6.6"
+  builder:
+    name: aosp
+    manifest:
+      repository: https://android.googlesource.com/kernel/manifest
+      branch: common-android15-6.6
   configs:
     - lindroid-drm
     - lxc
+    - docker
     - lxd
